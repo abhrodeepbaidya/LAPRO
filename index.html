@@ -234,6 +234,9 @@ body.chat-open #chatLauncher{display:none!important;visibility:hidden!important;
 .emoji-categories button{border:0;background:transparent;color:#aaa;border-radius:50%;width:34px;height:34px;font-size:19px}
 .emoji-categories button.active{color:#fff;background:#ffffff20}
 @media(min-width:700px){.emoji-picker{border-radius:28px;height:min(620px,75vh);padding-bottom:60px}.emoji-picker-backdrop{align-items:center}}
+
+/* Favourite community pins */
+.community-pin{margin-left:auto;flex:0 0 30px;width:30px;height:30px;border:1px solid transparent;border-radius:9px;background:transparent;color:#9aa4b8;font-size:17px;display:grid;place-items:center;padding:0;line-height:1}.community-pin:hover{background:#f1efff;border-color:#ded7ff;color:#6653b5}.community-pin.pinned{color:#e0a52d;background:#fff8e6;border-color:#f4dfad}.side-link .community-pin{margin-left:auto}.community-pin:focus-visible{outline:2px solid #8d7cff;outline-offset:2px}
 </style>
 </head>
 <body>
@@ -332,7 +335,12 @@ $('#enterBtn').addEventListener('click',function(){document.body.classList.add('
 $('#menuBtn').addEventListener('click',function(){$('#drawerBg').classList.add('show')});
 $('#closeDrawer').addEventListener('click',function(){$('#drawerBg').classList.remove('show')});
 $('#drawerBg').addEventListener('click',function(e){if(e.target===$('#drawerBg'))$('#drawerBg').classList.remove('show')});
+
+var LAPRO_PIN_KEY='lapro_pinned_communities';
+function getPinnedCommunities(){try{var v=JSON.parse(localStorage.getItem(LAPRO_PIN_KEY)||'[]');return Array.isArray(v)?v.filter(function(x){return ['Thoughts','Feelings','Questions','Facts','Kindness','BGMI'].includes(x)}):[]}catch(e){return []}}
+function renderCommunityPins(){var pinned=getPinnedCommunities();document.querySelectorAll('[data-community]').forEach(function(item){var c=item.dataset.community;if(c==='All')return;var pin=item.querySelector('.community-pin');if(!pin){pin=document.createElement('button');pin.type='button';pin.className='community-pin';pin.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();var name=item.dataset.community,now=getPinnedCommunities(),idx=now.indexOf(name);if(idx>=0)now.splice(idx,1);else now.push(name);localStorage.setItem(LAPRO_PIN_KEY,JSON.stringify(now));renderCommunityPins();toast(now.includes(name)?name+' pinned to your favourites.':name+' unpinned.');});item.appendChild(pin);}var active=pinned.includes(c);pin.classList.toggle('pinned',active);pin.textContent=active?'★':'☆';pin.setAttribute('aria-label',active?'Unpin '+c:'Pin '+c);pin.title=active?'Unpin community':'Pin favourite community';});['.sidebar','.drawer'].forEach(function(sel){var parent=document.querySelector(sel);if(!parent)return;var items=Array.from(parent.querySelectorAll('[data-community]'));items.sort(function(a,b){var ca=a.dataset.community,cb=b.dataset.community;if(ca==='All')return -1;if(cb==='All')return 1;return (pinned.indexOf(ca)<0?999:pinned.indexOf(ca))-(pinned.indexOf(cb)<0?999:pinned.indexOf(cb))});items.forEach(function(el){parent.appendChild(el)});});}
 document.querySelectorAll('[data-community]').forEach(function(b){b.addEventListener('click',function(){chooseCommunity(b.dataset.community)})});
+renderCommunityPins();
 $('#closeAuth').addEventListener('click',function(){$('#authBg').classList.remove('show')});
 $('#authBg').addEventListener('click',function(e){if(e.target===$('#authBg'))$('#authBg').classList.remove('show')});
 $('#signupTab').addEventListener('click',function(){openAuth('signup')});$('#loginTab').addEventListener('click',function(){openAuth('login')});
