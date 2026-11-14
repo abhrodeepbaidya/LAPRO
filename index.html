@@ -160,9 +160,8 @@ body.community-view #chatLauncher{display:block}
 @media(max-width:700px){.chat-context{width:min(320px,calc(100vw - 24px));border-radius:20px}.chat-reactions button{font-size:22px;padding:5px}}
 
 /* Ensure the floating chat launcher stays visible in community view */
-body.community-view #chatLauncher{display:inline-flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;position:fixed!important;right:max(14px,env(safe-area-inset-right))!important;bottom:max(18px,env(safe-area-inset-bottom))!important;z-index:60!important;align-items:center;justify-content:center;min-height:50px}
-body:not(.community-view) #chatLauncher{display:none!important}
-@media(max-width:700px){body.community-view #chatLauncher{right:14px!important;bottom:max(18px,env(safe-area-inset-bottom))!important}}
+#chatLauncher{display:inline-flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;position:fixed!important;right:max(14px,env(safe-area-inset-right))!important;bottom:max(18px,env(safe-area-inset-bottom))!important;z-index:60!important;align-items:center;justify-content:center;min-height:50px}
+@media(max-width:700px){#chatLauncher{right:14px!important;bottom:max(18px,env(safe-area-inset-bottom))!important}}
 
 /* Inbox is a navigation action, not a permanently selected community */
 .drawer-inbox{background:#fff!important;color:#29334a!important;border:1px solid #e3e7ef!important;box-shadow:none!important}
