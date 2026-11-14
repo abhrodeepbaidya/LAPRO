@@ -171,6 +171,10 @@ body:not(.community-view) #chatLauncher{display:none!important}
 #inboxBg{z-index:45!important}
 #inboxBg.show{display:flex!important;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
 #inboxBg .inbox-modal{width:min(560px,100%);max-height:calc(var(--visible-height,100dvh) - 32px);overflow:auto;margin:auto}
+
+/* Homepage dashboard and quick-post composer must never appear inside community feeds */
+body.community-view .home-hub{display:none!important}
+body:not(.community-view) .home-hub{display:block}
 </style>
 </head>
 <body>
