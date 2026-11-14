@@ -121,6 +121,19 @@ class Report(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    subject: Mapped[str] = mapped_column(String(160))
+    details: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    admin_reply: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -219,6 +232,17 @@ class ReportInput(BaseModel):
     target_id: int = Field(gt=0)
     reason: str
     details: Optional[str] = Field(default=None, max_length=1000)
+
+
+class SupportTicketInput(BaseModel):
+    category: str = Field(min_length=3, max_length=30)
+    subject: str = Field(min_length=4, max_length=160)
+    details: str = Field(min_length=10, max_length=4000)
+
+
+class SupportTicketUpdate(BaseModel):
+    status: str = Field(pattern=r"^(reviewing|resolved|closed)$")
+    admin_reply: Optional[str] = Field(default=None, max_length=2000)
 
 
 class MessageInput(BaseModel):
@@ -731,6 +755,77 @@ def staff_audit(
     return [{"id": x.id, "actor_id": x.actor_id, "action": x.action,
              "target_type": x.target_type, "target_id": x.target_id,
              "details": x.details, "created_at": x.created_at} for x in rows]
+
+
+# ---------------------------------------------------------------------------
+# User feedback, bug reports and support tickets
+# ---------------------------------------------------------------------------
+@app.post("/support/tickets", status_code=201)
+def create_support_ticket(
+    data: SupportTicketInput, user: User = Depends(get_current_user), db: Session = Depends(db_session)
+):
+    category = data.category.strip().lower()
+    if category not in {"bug", "technical_issue", "feature_request", "feedback", "complaint"}:
+        raise HTTPException(status_code=400, detail="Invalid support category")
+    ticket = SupportTicket(user_id=user.id, category=category, subject=data.subject.strip(),
+                           details=data.details.strip())
+    db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+    notify(db, user.id, "support_received", f"LAPRO received your support request #{ticket.id}. Our team will review it.")
+    db.commit()
+    return {"id": ticket.id, "status": ticket.status, "message": "Support request submitted"}
+
+
+@app.get("/support/tickets")
+def my_support_tickets(user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    rows = db.scalars(select(SupportTicket).where(SupportTicket.user_id == user.id)
+                       .order_by(desc(SupportTicket.created_at)).limit(100)).all()
+    return [{"id": t.id, "category": t.category, "subject": t.subject, "details": t.details,
+             "status": t.status, "admin_reply": t.admin_reply, "created_at": t.created_at,
+             "updated_at": t.updated_at} for t in rows]
+
+
+@app.get("/staff/support/tickets")
+def staff_support_tickets(
+    ticket_status: str = Query(default="open", alias="status"),
+    user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+    db: Session = Depends(db_session),
+):
+    stmt = select(SupportTicket)
+    if ticket_status != "all":
+        stmt = stmt.where(SupportTicket.status == ticket_status)
+    rows = db.scalars(stmt.order_by(desc(SupportTicket.created_at)).limit(300)).all()
+    return [{"id": t.id, "user_id": t.user_id, "category": t.category, "subject": t.subject,
+             "details": t.details, "status": t.status, "admin_reply": t.admin_reply,
+             "created_at": t.created_at} for t in rows]
+
+
+@app.patch("/staff/support/tickets/{ticket_id}")
+def update_support_ticket(
+    ticket_id: int, data: SupportTicketUpdate,
+    user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+    db: Session = Depends(db_session),
+):
+    ticket = db.get(SupportTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support ticket not found")
+    previous_status = ticket.status
+    ticket.status = data.status
+    if data.admin_reply is not None:
+        ticket.admin_reply = data.admin_reply.strip()
+    audit(db, user, "support_ticket_updated", "support_ticket", ticket_id,
+          f"{previous_status} -> {ticket.status}")
+    if ticket.status == "resolved" and previous_status != "resolved":
+        message = f"Your LAPRO request #{ticket.id} has been resolved."
+        if ticket.admin_reply:
+            message += f" Team reply: {ticket.admin_reply}"
+        notify(db, ticket.user_id, "support_resolved", message)
+    elif ticket.status == "reviewing" and previous_status != "reviewing":
+        notify(db, ticket.user_id, "support_reviewing",
+               f"Your LAPRO request #{ticket.id} is now being reviewed by our team.")
+    db.commit()
+    return {"id": ticket.id, "status": ticket.status, "admin_reply": ticket.admin_reply}
 
 
 # ---------------------------------------------------------------------------
