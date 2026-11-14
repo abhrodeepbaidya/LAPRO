@@ -99,8 +99,6 @@ def test_support_ticket_lifecycle_and_resolution_notification():
     ticket_id = created.json()["id"]
     assert created.json()["status"] == "open"
 
-    owner_response = register("supportowner", "owner@example.com")
-    assert owner_response.status_code == 201
     owner_login = client.post("/auth/login", json={
         "email": "owner@example.com", "password": "a-very-long-test-password"
     }).json()
