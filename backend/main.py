@@ -286,9 +286,15 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.get(User, user_id)
     if not user or user.status == "banned":
         raise HTTPException(status_code=401, detail="Account unavailable")
-    if user.restricted_until and user.restricted_until > utcnow():
-        # Restrictions block posting/messaging, not reading.
-        pass
+    if user.status == "restricted" and user.restricted_until:
+        expiry = user.restricted_until
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry <= utcnow():
+            user.status = "active"
+            user.restricted_until = None
+            # Persist automatic expiry of a temporary restriction.
+            db.commit()
     return user
 
 
@@ -301,10 +307,18 @@ def require_roles(*roles: str):
 
 
 def ensure_can_post(user: User):
-    if user.status != "active":
-        raise HTTPException(status_code=403, detail="Account is restricted")
-    if user.restricted_until and user.restricted_until > utcnow():
-        raise HTTPException(status_code=403, detail="Posting restriction is active")
+    if user.status == "banned":
+        raise HTTPException(status_code=403, detail="Account is banned")
+    if user.status == "restricted":
+        expiry = user.restricted_until
+        if expiry is None:
+            raise HTTPException(status_code=403, detail="Account is restricted")
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry > utcnow():
+            raise HTTPException(status_code=403, detail="Posting restriction is active")
+        user.status = "active"
+        user.restricted_until = None
 
 
 def add_xp(db: Session, user: User, points: int, reason: str, event_key: str):
@@ -494,8 +508,11 @@ def add_comment(post_id: int, data: CommentInput, user: User = Depends(get_curre
         raise HTTPException(status_code=404, detail="Post not found")
     comment = Comment(post_id=post_id, author_id=user.id, body=data.body.strip())
     db.add(comment)
+    db.flush()
     user.answer_count += 1
     add_xp(db, user, 1, "answer_posted", f"answer:{comment.id}")
+    if user.answer_count % 50 == 0:
+        add_xp(db, user, 10, "answer_50_milestone", f"user:{user.id}:answers:{user.answer_count}")
     if post.author_id != user.id:
         notify(db, post.author_id, "comment", f"{user.alias} replied to your post")
     db.commit()
