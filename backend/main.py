@@ -145,6 +145,14 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    blocker_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    blocked_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Message(Base):
     __tablename__ = "messages"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -243,6 +251,16 @@ class SupportTicketInput(BaseModel):
 class SupportTicketUpdate(BaseModel):
     status: str = Field(pattern=r"^(reviewing|resolved|closed)$")
     admin_reply: Optional[str] = Field(default=None, max_length=2000)
+
+
+class WarningInput(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+    send_email: bool = False
+
+
+class StaffPostInput(BaseModel):
+    category: str = Field(min_length=3, max_length=20)
+    body: str = Field(min_length=1, max_length=3000)
 
 
 class MessageInput(BaseModel):
@@ -758,6 +776,116 @@ def staff_audit(
 
 
 # ---------------------------------------------------------------------------
+# User blocking, staff warnings, global content and chat moderation
+# ---------------------------------------------------------------------------
+@app.post("/users/{user_id}/block")
+def block_user(user_id: int, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    if user_id == user.id:
+        raise HTTPException(status_code=400, detail="You cannot block yourself")
+    target = db.get(User, user_id)
+    if not target or target.role in {"owner", "admin"}:
+        raise HTTPException(status_code=404, detail="User not found")
+    existing = db.scalar(select(UserBlock).where(
+        UserBlock.blocker_id == user.id, UserBlock.blocked_id == user_id
+    ))
+    if not existing:
+        db.add(UserBlock(blocker_id=user.id, blocked_id=user_id))
+        db.commit()
+    return {"blocked": True, "user_id": user_id}
+
+
+@app.delete("/users/{user_id}/block")
+def unblock_user(user_id: int, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    existing = db.scalar(select(UserBlock).where(
+        UserBlock.blocker_id == user.id, UserBlock.blocked_id == user_id
+    ))
+    if existing:
+        db.delete(existing)
+        db.commit()
+    return {"blocked": False, "user_id": user_id}
+
+
+@app.post("/staff/users/{user_id}/warning")
+def warn_user(user_id: int, data: WarningInput,
+              user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+              db: Session = Depends(db_session)):
+    target = db.get(User, user_id)
+    if not target or target.role == "owner" or (user.role != "owner" and target.role in {"admin", "manager"}):
+        raise HTTPException(status_code=404, detail="User not found or action not allowed")
+    message = "LAPRO account warning: " + data.reason.strip()
+    notify(db, target.id, "account_warning", message)
+    audit(db, user, "user_warning_sent", "user", target.id, data.reason.strip())
+    db.commit()
+    return {"user_id": target.id, "warning_sent": True,
+            "email_status": "not_configured" if data.send_email else "not_requested",
+            "message": "In-app warning delivered. Email delivery requires verified SMTP/email provider configuration."}
+
+
+@app.get("/staff/posts")
+def staff_all_posts(
+    post_status: str = Query(default="all", alias="status"),
+    limit: int = Query(default=100, ge=1, le=500),
+    user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+    db: Session = Depends(db_session),
+):
+    stmt = select(Post)
+    if post_status != "all":
+        stmt = stmt.where(Post.status == post_status)
+    rows = db.scalars(stmt.order_by(desc(Post.created_at)).limit(limit)).all()
+    return [post_payload(db, post) for post in rows]
+
+
+@app.post("/staff/posts", status_code=201)
+def staff_publish_post(data: StaffPostInput,
+                       user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+                       db: Session = Depends(db_session)):
+    category = data.category.lower().strip()
+    if category not in CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid category")
+    post = Post(author_id=user.id, category=category, body=data.body.strip())
+    db.add(post)
+    db.flush()
+    audit(db, user, "staff_post_published", "post", post.id, category)
+    db.commit()
+    db.refresh(post)
+    return post_payload(db, post)
+
+
+@app.delete("/staff/posts/{post_id}")
+def staff_delete_post(post_id: int,
+                      user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+                      db: Session = Depends(db_session)):
+    post = db.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    post.status = "removed"
+    audit(db, user, "staff_post_removed", "post", post_id, "Removed from staff panel")
+    db.commit()
+    return {"ok": True, "id": post_id, "status": "removed"}
+
+
+@app.delete("/staff/conversations/{user_a_id}/{user_b_id}")
+def staff_delete_conversation(user_a_id: int, user_b_id: int,
+                              user: User = Depends(require_roles("owner", "admin")),
+                              db: Session = Depends(db_session)):
+    if user_a_id == user_b_id or not db.get(User, user_a_id) or not db.get(User, user_b_id):
+        raise HTTPException(status_code=404, detail="Conversation participants not found")
+    rows = db.scalars(select(Message).where(
+        or_(
+            (Message.sender_id == user_a_id) & (Message.recipient_id == user_b_id),
+            (Message.sender_id == user_b_id) & (Message.recipient_id == user_a_id),
+        )
+    )).all()
+    count = len(rows)
+    for row in rows:
+        db.delete(row)
+    audit(db, user, "conversation_deleted", "conversation", user_a_id,
+          f"participants={user_a_id},{user_b_id}; messages_deleted={count}")
+    db.commit()
+    return {"ok": True, "messages_deleted": count}
+
+
+# ---------------------------------------------------------------------------
 # User feedback, bug reports and support tickets
 # ---------------------------------------------------------------------------
 @app.post("/support/tickets", status_code=201)
@@ -839,6 +967,14 @@ def send_message(data: MessageInput, user: User = Depends(get_current_user), db:
     recipient = db.get(User, data.recipient_id)
     if not recipient or recipient.status == "banned":
         raise HTTPException(status_code=404, detail="Recipient not found")
+    blocked = db.scalar(select(UserBlock).where(
+        or_(
+            (UserBlock.blocker_id == user.id) & (UserBlock.blocked_id == recipient.id),
+            (UserBlock.blocker_id == recipient.id) & (UserBlock.blocked_id == user.id),
+        )
+    ))
+    if blocked:
+        raise HTTPException(status_code=403, detail="Messaging is unavailable between these accounts")
     message = Message(sender_id=user.id, recipient_id=recipient.id, body=data.body.strip())
     db.add(message)
     notify(db, recipient.id, "message", f"New message from {user.alias}")
