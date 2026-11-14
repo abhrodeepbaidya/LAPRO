@@ -1,25 +1,58 @@
 # LAPRO
 
-LAPRO is a prototype for a global anonymous thoughts and feelings community.
+**Thoughts without identity.** LAPRO is an early-stage community product concept for sharing feelings, thoughts, facts and questions under a public alias.
 
-## Current prototype
-- Responsive landing page and community feed
-- Sample posts across feelings, thoughts, facts and questions
-- Local-only post preview and category filtering
-- Anonymous alias entry UI (demo only)
+## Current release: frontend prototype
 
-## Important status
-This is a frontend prototype. Authentication, persistence, real-time messaging, moderation workflows, staff roles, owner controls and production privacy/security are **not implemented yet**. Do not use it to collect real user data.
+The GitHub Pages site currently includes:
+- Responsive layout for desktop and mobile
+- Global feed with category filters
+- Public channel filters
+- Search across posts and answers
+- Create thought, feeling, fact or question
+- Ask & Answer threads, including unanswered-question and supported-post views
+- Support reactions, share-link UI and alias selection
+- Browser-local persistence using localStorage
 
-## Planned architecture
+## Important limitations
+
+This release is a **single-browser frontend demo**, not a production social network:
+- Posts, answers and aliases are stored only in the visitor's browser.
+- Visitors do not see each other's posts.
+- There is no real account authentication, server database, cross-device sync, live chat, private inbox, staff moderation or owner console yet.
+- Report actions are placeholders and do not contact moderators.
+- Do not enter personal, sensitive or confidential information.
+
+A public alias hides a name from the public interface; it does not guarantee anonymity from the service operator or network providers. A production service must explain what operational data is collected and why.
+
+## Planned production architecture
+
 - Frontend: Next.js + TypeScript
 - API: Python FastAPI
 - Database: PostgreSQL
-- Realtime: WebSockets
-- Deployment: Vercel (frontend) + Render (API)
+- Real-time channel chat: WebSockets
+- Hosting: Vercel (frontend) + Render (API/database)
+- Authentication: pseudonymous account IDs, secure passwordless or credential flow, session rotation and rate limits
+- Authorization: server-enforced owner, admin, manager, supervisor, guard and user permissions
 
-## Run locally
-Open `index.html` in a browser, or serve the folder with any static HTTP server.
+## Planned product milestones
 
-## Privacy and moderation
-Anonymous public display is not the same as zero data collection. A production release needs a clear privacy notice, data minimization, access controls, encryption in transit and at rest, audited moderator access, retention/deletion rules, abuse reporting, and applicable legal review.
+1. Backend API and persistent accounts/posts/questions/answers
+2. Secure authentication, role-based permissions and owner console
+3. Channel chat and private inbox with blocking/reporting controls
+4. Moderation queue, warnings, timed restrictions/bans and immutable staff audit trail
+5. Privacy policy, data retention/deletion controls, security review and launch readiness
+
+## Local preview
+
+Open `index.html` in a browser, or run a static server in this directory:
+
+```bash
+python -m http.server 8000
+```
+
+Then visit http://localhost:8000.
+
+## Privacy and safety requirements before public launch
+
+Use least-privilege staff access, TLS, encrypted database storage/backups, secure secret management, rate limiting, abuse reporting, audited moderator access, retention/deletion policies, backups and incident response. Moderation access to message content must be clearly disclosed. Do not promise end-to-end privacy if staff can inspect message content.
