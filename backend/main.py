@@ -1,6 +1,7 @@
 import os
 import re
 import secrets
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Generator, Optional
 
@@ -34,6 +35,7 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "30"))
 REFRESH_TOKEN_DAYS = int(os.getenv("REFRESH_TOKEN_DAYS", "14"))
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").strip().lower()
+MASTER_PASSCODE = os.getenv("MASTER_PASSCODE", "")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 FRONTEND_ORIGINS = [
     item.strip() for item in os.getenv(
@@ -476,6 +478,21 @@ def register(data: RegisterInput, db: Session = Depends(db_session)):
     db.commit()
     db.refresh(user)
     return user
+
+
+@app.post("/master/login")
+def master_login(data: LoginInput, db: Session = Depends(db_session)):
+    if not MASTER_PASSCODE:
+        raise HTTPException(status_code=503, detail="Master passcode is not configured")
+    email = str(data.email).lower().strip()
+    if not OWNER_EMAIL or email != OWNER_EMAIL or not hmac.compare_digest(data.password, MASTER_PASSCODE):
+        raise HTTPException(status_code=401, detail="Incorrect owner email or passcode")
+    user = db.scalar(select(User).where(func.lower(User.email) == email))
+    if not user or user.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner account is not registered yet")
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="Owner account is unavailable")
+    return create_tokens(user)
 
 
 @app.post("/auth/login")
