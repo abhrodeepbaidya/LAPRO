@@ -133,6 +133,11 @@ body.community-view #chatLauncher{display:block}
 @media(max-width:700px){.home-hub{padding-bottom:38px}.home-stats{gap:7px}.home-stat{padding:12px 9px;border-radius:14px}.home-stat strong{font-size:22px}.home-stat span{font-size:10px}.home-community-counts{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.home-community-count{padding:9px;font-size:11px}.home-quick-post{padding:15px;border-radius:18px}.home-post-row{flex-direction:column}.home-post-row .btn{width:100%}}
 
 .post-actions{align-items:center}.post-views{margin-right:auto;display:inline-flex;align-items:center;gap:5px;color:#8992a5;font-size:10px;font-weight:650;white-space:nowrap;padding:7px 2px}.post-views .view-eye{font-size:12px;opacity:.8}@media(max-width:700px){.post-views{flex-basis:100%;padding:0 2px 2px;margin-right:0;order:-1}}
+
+/* Keep the LAPRO navigation visible while scrolling */
+.top{position:sticky;top:0;z-index:18;height:76px;background:rgba(255,255,255,.94);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border-bottom:1px solid #e2e7f0;box-shadow:0 5px 22px #24304a0b;scroll-margin-top:0}
+@supports(padding:env(safe-area-inset-top)){.top{top:0}}
+@media(max-width:700px){.top{height:68px;min-height:68px}}
 </style>
 </head>
 <body>
