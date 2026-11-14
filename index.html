@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#090b12">
+  <meta name="description" content="LAPRO — a global space for anonymous thoughts, feelings and conversations.">
+  <title>LAPRO — Thoughts without identity</title>
+  <style>
+    :root{color-scheme:dark;--bg:#090b12;--panel:#111522;--panel2:#171d2d;--line:#252d40;--text:#f4f6ff;--muted:#9ba6bd;--violet:#9b8cff;--cyan:#66e0d2;--danger:#ff7887}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 80% 0%,#24204b 0,transparent 36%),var(--bg);color:var(--text);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+    button,input,textarea{font:inherit}button{cursor:pointer}.shell{max-width:1180px;margin:auto;padding:22px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0 24px;border-bottom:1px solid var(--line)}
+    .brand{display:flex;align-items:center;gap:11px;font-weight:850;letter-spacing:.18em;font-size:20px}.mark{width:36px;height:36px;border-radius:12px;background:linear-gradient(135deg,var(--violet),var(--cyan));display:grid;place-items:center;color:#0a0c14;font-weight:950;letter-spacing:0}
+    .top-actions{display:flex;gap:10px;align-items:center}.pill{border:1px solid var(--line);background:#ffffff08;color:var(--muted);border-radius:99px;padding:8px 12px;font-size:12px}
+    .btn{border:0;border-radius:12px;padding:11px 16px;font-weight:750;color:#090b12;background:linear-gradient(110deg,var(--violet),var(--cyan));box-shadow:0 8px 28px #8d83ff25}.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);box-shadow:none}
+    .hero{padding:54px 0 34px;display:grid;grid-template-columns:1.25fr .75fr;gap:28px;align-items:center}.eyebrow{color:var(--cyan);font-weight:800;letter-spacing:.15em;text-transform:uppercase;font-size:11px}
+    h1{font-size:clamp(40px,7vw,72px);line-height:1.02;letter-spacing:-.055em;margin:13px 0 18px;max-width:720px}h1 span{background:linear-gradient(100deg,#b4a8ff,var(--cyan));color:transparent;background-clip:text}
+    .sub{color:var(--muted);font-size:17px;max-width:590px}.hero-card,.panel{background:linear-gradient(145deg,#171d2deF,#101522);border:1px solid var(--line);border-radius:22px;box-shadow:0 20px 70px #0005}
+    .hero-card{padding:24px}.orbit{height:180px;display:grid;place-items:center;position:relative}.orb{width:132px;height:132px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#d5ceff,#8876ff 42%,#29244d 72%);box-shadow:0 0 70px #9b8cff55;display:grid;place-items:center;color:#151426;font-size:42px;font-weight:900}.ring{position:absolute;width:176px;height:176px;border:1px solid #8e82ff55;border-radius:50%}
+    .quote{font-size:19px;font-weight:700;text-align:center;margin:8px 0}.quote small{display:block;color:var(--muted);font-size:12px;font-weight:500;margin-top:8px}
+    .layout{display:grid;grid-template-columns:230px minmax(0,1fr) 250px;gap:18px;align-items:start;padding:12px 0 50px}.panel{padding:18px}.section-title{font-size:13px;color:var(--muted);font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin:0 0 14px}
+    .nav{display:grid;gap:7px}.nav button{border:0;background:transparent;color:var(--muted);text-align:left;padding:11px 12px;border-radius:11px}.nav button.active,.nav button:hover{background:#8e82ff18;color:var(--text)}
+    .compose{margin-bottom:15px}.compose textarea{width:100%;resize:vertical;min-height:88px;background:#0b0f19;border:1px solid var(--line);border-radius:13px;padding:13px;color:var(--text);outline:none}.compose textarea:focus,input:focus{border-color:var(--violet)}
+    .compose-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;color:var(--muted);font-size:12px}
+    .feed{display:grid;gap:13px}.post{background:#111725;border:1px solid var(--line);border-radius:17px;padding:17px}.post-head{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}.post p{font-size:15px;margin:13px 0 16px;white-space:pre-wrap;overflow-wrap:anywhere}.post-actions{display:flex;gap:8px;flex-wrap:wrap}.post-actions button{background:#ffffff08;border:1px solid var(--line);border-radius:9px;padding:7px 10px;color:var(--muted);font-size:12px}.post-actions button:hover{color:var(--cyan);border-color:#66e0d255}
+    .channel{display:flex;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);color:var(--text);font-size:13px}.channel span{color:var(--muted);font-size:11px}.notice{color:var(--muted);font-size:12px;margin-top:15px;line-height:1.6}.stat{display:flex;justify-content:space-between;padding:9px 0;color:var(--muted);font-size:13px}.stat strong{color:var(--text)}
+    .modal-backdrop{position:fixed;inset:0;background:#03040acc;display:none;place-items:center;padding:18px;z-index:5}.modal-backdrop.show{display:grid}.modal{width:min(430px,100%);background:#141a29;border:1px solid var(--line);border-radius:20px;padding:24px;box-shadow:0 25px 100px #0009}.modal h2{margin:0 0 8px}.modal p{color:var(--muted);font-size:13px}.modal input{width:100%;margin:7px 0 12px;background:#0b0f19;border:1px solid var(--line);border-radius:10px;padding:12px;color:var(--text);outline:none}.modal-actions{display:flex;gap:9px;margin-top:12px}.modal-actions>*{flex:1}
+    .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#20283a;border:1px solid var(--line);padding:11px 16px;border-radius:12px;display:none;z-index:9;box-shadow:0 10px 40px #0008}.toast.show{display:block}
+    footer{border-top:1px solid var(--line);padding:20px 0 35px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    @media(max-width:900px){.layout{grid-template-columns:190px 1fr}.right{display:none}.hero{grid-template-columns:1fr .7fr}}
+    @media(max-width:650px){.shell{padding:15px}.hero{grid-template-columns:1fr;padding:38px 0 22px}.hero-card{display:none}.layout{grid-template-columns:1fr}.left{order:2}.top .pill{display:none}.top-actions .ghost{display:none}h1{font-size:48px}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="top">
+      <div class="brand"><div class="mark">L</div> LAPRO</div>
+      <div class="top-actions"><span class="pill">● Anonymous by design</span><button class="btn ghost" id="signinTop">Sign in</button><button class="btn" id="joinTop">Join LAPRO</button></div>
+    </header>
+    <section class="hero">
+      <div><div class="eyebrow">A world without labels</div><h1>Your identity stays hidden.<br><span>Your thoughts speak.</span></h1><p class="sub">A global space to share what you think, what you feel, and what you know — without putting your personal identity on display.</p><button class="btn" id="joinHero">Enter the conversation ↗</button></div>
+      <div class="hero-card"><div class="orbit"><div class="ring"></div><div class="orb">L</div></div><div class="quote">“Be heard for what you say,<br>not who you are.”<small>THE LAPRO IDEA</small></div></div>
+    </section>
+    <section class="layout">
+      <aside class="panel left"><h3 class="section-title">Explore</h3><nav class="nav"><button class="active" data-filter="All">◈ Global feed</button><button data-filter="Feelings">♡ Feelings</button><button data-filter="Thoughts">✧ Thoughts</button><button data-filter="Facts">◎ Facts & ideas</button><button data-filter="Questions">? Questions</button></nav><h3 class="section-title" style="margin-top:24px">Channels</h3><div class="channel"># open-conversations <span>Global</span></div><div class="channel"># late-night-thoughts <span>Global</span></div><div class="channel"># facts-and-curiosity <span>Global</span></div><div class="channel"># kindness <span>Global</span></div><p class="notice">Channels are public discussion spaces. Private messaging and live channel chat are planned for a later release.</p></aside>
+      <main>
+        <div class="panel compose"><h3 class="section-title">Share a thought</h3><textarea id="thought" maxlength="500" placeholder="What's on your mind? Keep it human. Keep it respectful."></textarea><div class="compose-foot"><label><select id="category" style="background:#111725;color:#c5cce0;border:1px solid #30394e;border-radius:8px;padding:7px"><option>Thoughts</option><option>Feelings</option><option>Facts</option><option>Questions</option></select></label><span id="count">0 / 500</span><button class="btn" id="postBtn">Post thought</button></div></div>
+        <div class="feed" id="feed"></div>
+      </main>
+      <aside class="panel right"><h3 class="section-title">LAPRO principles</h3><div class="stat"><span>Identity display</span><strong>Hidden</strong></div><div class="stat"><span>Community</span><strong>Worldwide</strong></div><div class="stat"><span>Voice</span><strong>Yours</strong></div><div class="stat"><span>Respect</span><strong>Required</strong></div><p class="notice">Anonymous does not mean consequence-free. Reported content can be reviewed by authorized moderators under a published privacy policy.</p><h3 class="section-title" style="margin-top:24px">Coming next</h3><div class="channel">Private inbox <span>Planned</span></div><div class="channel">Live chat <span>Planned</span></div><div class="channel">Staff console <span>Planned</span></div><div class="channel">Owner console <span>Planned</span></div></aside>
+    </section>
+    <footer><span>© <span id="year"></span> LAPRO. Thoughts without identity.</span><span>Prototype preview · Do not share sensitive personal information.</span></footer>
+  </div>
+  <div class="modal-backdrop" id="authModal"><div class="modal"><h2 id="modalTitle">Join LAPRO</h2><p id="modalDesc">Create an anonymous display identity. No public real name is required.</p><label for="alias">Your anonymous alias</label><input id="alias" maxlength="24" placeholder="e.g. QuietComet"><div class="modal-actions"><button class="btn ghost" id="closeModal">Cancel</button><button class="btn" id="continueBtn">Continue</button></div><p>Demo only: this prototype does not create an account or send data to a server.</p></div></div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const $=s=>document.querySelector(s);
+    const samples=[
+      {category:"Feelings",text:"Some days, simply making it through the day is an achievement. If that's you today, this is your reminder that it counts.",alias:"SoftRain",time:"2 min ago",likes:18},
+      {category:"Thoughts",text:"A good conversation doesn't always change your mind. Sometimes it helps you understand why you think the way you do.",alias:"NorthStar",time:"14 min ago",likes:12},
+      {category:"Facts",text:"Octopuses have three hearts. Two pump blood to the gills, while one pumps it to the rest of the body.",alias:"CuriousMind",time:"31 min ago",likes:9},
+      {category:"Questions",text:"What's one small thing that made your week better?",alias:"BlueHour",time:"1 hr ago",likes:27}
+    ];
+    let posts=[...samples],filter="All";
+    function esc(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+    function render(){const list=posts.filter(p=>filter==="All"||p.category===filter);$("#feed").innerHTML=list.map((p,i)=>'<article class="post"><div class="post-head"><span>◉ '+esc(p.alias)+' · '+esc(p.category)+'</span><span>'+esc(p.time)+'</span></div><p>'+esc(p.text)+'</p><div class="post-actions"><button data-like="'+i+'">♡ '+p.likes+' Support</button><button data-share="'+i+'">↗ Share</button><button data-report="'+i+'">⚑ Report</button></div></article>').join("")||'<div class="panel">No posts in this category yet.</div>'}
+    function toast(s){$("#toast").textContent=s;$("#toast").classList.add("show");setTimeout(()=>$("#toast").classList.remove("show"),2400)}
+    function modal(){ $("#authModal").classList.add("show");$("#alias").focus() }
+    ["#joinTop","#joinHero","#signinTop"].forEach(id=>$(id).addEventListener("click",modal));
+    $("#closeModal").onclick=()=>$("#authModal").classList.remove("show");
+    $("#continueBtn").onclick=()=>{const a=$("#alias").value.trim();if(!a)return toast("Choose an anonymous alias first.");$("#authModal").classList.remove("show");toast("Welcome, "+a+". Account creation will be enabled in the backend release.")};
+    $("#thought").addEventListener("input",()=>$("#count").textContent=$("#thought").value.length+" / 500");
+    $("#postBtn").onclick=()=>{const t=$("#thought").value.trim();if(!t)return toast("Write a thought before posting.");posts.unshift({category:$("#category").value,text:t,alias:"GuestVoice",time:"Just now",likes:0});$("#thought").value="";$("#count").textContent="0 / 500";filter="All";document.querySelectorAll("[data-filter]").forEach(b=>b.classList.toggle("active",b.dataset.filter==="All"));render();toast("Preview post added on this device.")};
+    document.querySelectorAll("[data-filter]").forEach(b=>b.onclick=()=>{filter=b.dataset.filter;document.querySelectorAll("[data-filter]").forEach(x=>x.classList.toggle("active",x===b));render()});
+    $("#feed").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.like!==undefined){const p=posts.filter(x=>filter==="All"||x.category===filter)[Number(b.dataset.like)];if(p){p.likes++;render()}}else if(b.dataset.report!==undefined)toast("Reporting will be available after sign-in in the secure release.");else if(b.dataset.share!==undefined)toast("Share links will be enabled in a later release.")});
+    $("#year").textContent=new Date().getFullYear();render();
+  </script>
+</body>
+</html>
