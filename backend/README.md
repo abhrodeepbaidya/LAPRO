@@ -35,6 +35,10 @@ Open http://127.0.0.1:8000/docs.
 - Reports: `POST /reports`
 - Staff: `GET /staff/reports`, `PATCH /staff/reports/{report_id}`, role/restriction/ban/XP/audit routes under `/staff`
 - Inbox: `POST /messages`, `GET /messages/{other_user_id}`
+- User block/unblock: `POST /users/{user_id}/block`, `DELETE /users/{user_id}/block` (blocks new messages in both directions)
+- Staff warnings: `POST /staff/users/{user_id}/warning` (in-app warning; email requires SMTP provider configuration)
+- Staff post management: `GET /staff/posts`, `POST /staff/posts`, `DELETE /staff/posts/{post_id}`
+- Chat moderation: `DELETE /staff/conversations/{user_a_id}/{user_b_id}` (Owner/Admin only; deletes stored messages and records an audit entry)
 - Notifications: `GET /notifications`, `POST /notifications/{notification_id}/read`
 
 ## Important limitations before public launch
