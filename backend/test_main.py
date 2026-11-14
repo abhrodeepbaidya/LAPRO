@@ -82,3 +82,40 @@ def test_bgmi_news_is_staff_published_and_publicly_readable():
     feed = client.get("/bgmi/news")
     assert feed.status_code == 200
     assert any(item["title"] == "BGMI community test update" for item in feed.json())
+
+def test_support_ticket_lifecycle_and_resolution_notification():
+    user_response = register("supportuser", "supportuser@example.com")
+    assert user_response.status_code == 201
+    user_login = client.post("/auth/login", json={
+        "email": "supportuser@example.com", "password": "a-very-long-test-password"
+    }).json()
+    user_headers = {"Authorization": f"Bearer {user_login['access_token']}"}
+    created = client.post("/support/tickets", headers=user_headers, json={
+        "category": "bug",
+        "subject": "Composer button does not respond",
+        "details": "The publish button does not respond on my mobile browser."
+    })
+    assert created.status_code == 201
+    ticket_id = created.json()["id"]
+    assert created.json()["status"] == "open"
+
+    owner_response = register("supportowner", "owner@example.com")
+    assert owner_response.status_code == 201
+    owner_login = client.post("/auth/login", json={
+        "email": "owner@example.com", "password": "a-very-long-test-password"
+    }).json()
+    owner_headers = {"Authorization": f"Bearer {owner_login['access_token']}"}
+    queue = client.get("/staff/support/tickets?status=open", headers=owner_headers)
+    assert queue.status_code == 200
+    assert any(item["id"] == ticket_id for item in queue.json())
+
+    resolved = client.patch(f"/staff/support/tickets/{ticket_id}", headers=owner_headers, json={
+        "status": "resolved", "admin_reply": "Fixed in the latest update."
+    })
+    assert resolved.status_code == 200
+    mine = client.get("/support/tickets", headers=user_headers)
+    assert mine.status_code == 200
+    assert mine.json()[0]["status"] == "resolved"
+    notices = client.get("/notifications", headers=user_headers)
+    assert notices.status_code == 200
+    assert any(item["kind"] == "support_resolved" for item in notices.json())
