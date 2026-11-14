@@ -15,6 +15,7 @@ $env:JWT_SECRET = (py -c "import secrets; print(secrets.token_urlsafe(48))")
 $env:DATABASE_URL = "sqlite:///./lapro_dev.db"
 $env:FRONTEND_ORIGINS = "http://localhost:5500,http://127.0.0.1:5500,https://abhrodeepbaidya.github.io"
 $env:OWNER_EMAIL = "your-owner-email@example.com"
+$env:GOOGLE_CLIENT_ID = "your-google-oauth-client-id.apps.googleusercontent.com"
 uvicorn main:app --reload
 ```
 
@@ -23,7 +24,8 @@ Open http://127.0.0.1:8000/docs.
 ## Main routes
 
 - Health: `GET /health`
-- Auth: `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `GET /auth/me`
+- Auth: `POST /auth/register`, `POST /auth/login`, `POST /auth/google` (Google Identity Services ID token), `POST /auth/refresh`, `GET /auth/me`
+- Google sign-in: create an OAuth 2.0 Web application client in Google Cloud Console; add the exact website origin to Authorized JavaScript origins; set its Client ID as the frontend GIS client ID and backend `GOOGLE_CLIENT_ID`. Never put a Google client secret in frontend code.
 - Posts: `GET/POST /posts`, `GET/PATCH/DELETE /posts/{post_id}`
 - Comments: `GET/POST /posts/{post_id}/comments`, `DELETE /comments/{comment_id}`
 - Likes: `POST /posts/{post_id}/like` (toggle)
