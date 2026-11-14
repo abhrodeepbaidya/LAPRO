@@ -34,6 +34,7 @@ Open http://127.0.0.1:8000/docs.
 - Support admin queue: `GET /staff/support/tickets?status=open|reviewing|resolved|closed|all`, `PATCH /staff/support/tickets/{ticket_id}` (Owner/Admin/Manager/Supervisor only; resolving sends an in-app notification to the requester)
 - Reports: `POST /reports`
 - Staff: `GET /staff/reports`, `PATCH /staff/reports/{report_id}`, role/restriction/ban/XP/audit routes under `/staff`
+- Chat maintenance: `GET /status/chat` (public status), `PUT /master/settings/chat-maintenance` (Owner) or `PUT /admin/settings/chat-maintenance` (Admin) with `enabled`, `duration_minutes` and optional `notice`; messaging and conversation reads return HTTP 503 during maintenance, then automatically resume when the timer expires.
 - Inbox: `POST /messages`, `GET /messages/{other_user_id}`
 - User block/unblock: `POST /users/{user_id}/block`, `DELETE /users/{user_id}/block` (blocks new messages in both directions)
 - Staff warnings: `POST /staff/users/{user_id}/warning` (in-app warning; email requires SMTP provider configuration)
