@@ -28,6 +28,7 @@ Open http://127.0.0.1:8000/docs.
 - Comments: `GET/POST /posts/{post_id}/comments`, `DELETE /comments/{comment_id}`
 - Likes: `POST /posts/{post_id}/like` (toggle)
 - Profiles: `GET /users/{user_id}`, `GET /users/{user_id}/posts`, `GET /users?q=...`
+- BGMI Community: `GET /bgmi/news` (public feed), `POST /staff/bgmi/news` (Owner/Admin/Manager/Supervisor), `DELETE /staff/bgmi/news/{news_id}` (staff)
 - XP: `GET /xp/tiers`, `GET /xp/me`
 - Reports: `POST /reports`
 - Staff: `GET /staff/reports`, `PATCH /staff/reports/{report_id}`, role/restriction/ban/XP/audit routes under `/staff`
@@ -39,3 +40,8 @@ Open http://127.0.0.1:8000/docs.
 This is a broad v1 API foundation, not a fully production-hardened social network. It still needs Alembic migrations, automated tests, email verification and password reset, refresh-token revocation/session management, persistent rate limiting, abuse/spam detection, block lists, privacy controls, encrypted backups, monitoring, and security review. Direct messages currently have no block/report workflow. Real-time chat/WebSockets and media uploads are not implemented. Staff permission granularity needs a final policy review before production.
 
 The first registered account only receives the Owner role when its email matches the server-side `OWNER_EMAIL` setting. Set that environment variable before creating the Owner account. Never commit JWT secrets or database credentials.
+
+
+## BGMI Community
+
+The website includes a dedicated BGMI Community entry for gamers to discuss BGMI, patch notes, esports, tournaments and updates. The API provides a public news feed and staff-only publishing/removal endpoints. Staff should include an HTTPS source link for externally sourced news. The static website preview still stores posts in the visitor's browser; live website-to-API integration is a separate deployment step.
