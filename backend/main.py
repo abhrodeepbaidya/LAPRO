@@ -12,8 +12,10 @@ from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from pwdlib import PasswordHash
 from sqlalchemy import (
     Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
-    create_engine, func, select, desc, or_
+    create_engine, func, select, desc, or_, inspect as sa_inspect, text
 )
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 # ---------------------------------------------------------------------------
@@ -32,6 +34,7 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "30"))
 REFRESH_TOKEN_DAYS = int(os.getenv("REFRESH_TOKEN_DAYS", "14"))
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").strip().lower()
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 FRONTEND_ORIGINS = [
     item.strip() for item in os.getenv(
         "FRONTEND_ORIGINS",
@@ -61,6 +64,7 @@ class User(Base):
     alias: Mapped[str] = mapped_column(String(30), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    google_sub: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
     role: Mapped[str] = mapped_column(String(20), default="user", index=True)
     xp: Mapped[int] = mapped_column(Integer, default=0)
     answer_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -192,6 +196,12 @@ class Notification(Base):
 
 
 Base.metadata.create_all(bind=engine)
+# Add the nullable Google subject column to existing deployments.
+if "google_sub" not in {column["name"] for column in sa_inspect(engine).get_columns("users")}:
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE users ADD COLUMN google_sub VARCHAR(255)"))
+with engine.begin() as connection:
+    connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_sub ON users (google_sub)"))
 
 # ---------------------------------------------------------------------------
 # API, schemas and helpers
@@ -226,6 +236,11 @@ class RegisterInput(BaseModel):
 class LoginInput(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
+
+
+class GoogleAuthInput(BaseModel):
+    credential: str = Field(min_length=20, max_length=10000)
+    alias: Optional[str] = Field(default=None, min_length=3, max_length=30, pattern=r"^[A-Za-z0-9_]+$")
 
 
 class RefreshInput(BaseModel):
@@ -471,6 +486,52 @@ def login(data: LoginInput, db: Session = Depends(db_session)):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     if user.status == "banned":
         raise HTTPException(status_code=403, detail="Account is banned")
+    return create_tokens(user)
+
+
+@app.post("/auth/google")
+def google_auth(data: GoogleAuthInput, db: Session = Depends(db_session)):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured on this server")
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            data.credential, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Google credential is invalid or expired")
+    if not claims.get("email_verified"):
+        raise HTTPException(status_code=403, detail="Google account email is not verified")
+    email = str(claims.get("email", "")).strip().lower()
+    subject = str(claims.get("sub", "")).strip()
+    if not email or not subject:
+        raise HTTPException(status_code=401, detail="Google account is missing required identity claims")
+
+    user = db.scalar(select(User).where(User.google_sub == subject))
+    if not user:
+        user = db.scalar(select(User).where(func.lower(User.email) == email))
+        if user:
+            if user.google_sub and user.google_sub != subject:
+                raise HTTPException(status_code=409, detail="This email is already linked to another Google account")
+            user.google_sub = subject
+        else:
+            base_alias = (data.alias or email.split("@", 1)[0]).strip()
+            base_alias = re.sub(r"[^A-Za-z0-9_]", "_", base_alias)[:24]
+            if len(base_alias) < 3:
+                base_alias = "user_" + secrets.token_hex(3)
+            alias = base_alias
+            while db.scalar(select(User.id).where(func.lower(User.alias) == alias.lower())):
+                alias = (base_alias[:23] + "_" + secrets.token_hex(2))[:30]
+            role = "owner" if OWNER_EMAIL and email == OWNER_EMAIL else "user"
+            user = User(
+                alias=alias, email=email, google_sub=subject,
+                password_hash=password_hasher.hash(secrets.token_urlsafe(48)),
+                role=role,
+            )
+            db.add(user)
+    if user.status == "banned":
+        raise HTTPException(status_code=403, detail="Account is banned")
+    db.commit()
+    db.refresh(user)
     return create_tokens(user)
 
 
