@@ -158,6 +158,11 @@ body.community-view #chatLauncher{display:block}
 .chat-compose #chatInput{min-width:0}
 .chat-bubble.chat-editing{outline:2px solid #9588f4}
 @media(max-width:700px){.chat-context{width:min(320px,calc(100vw - 24px));border-radius:20px}.chat-reactions button{font-size:22px;padding:5px}}
+
+/* Ensure the floating chat launcher stays visible in community view */
+body.community-view #chatLauncher{display:inline-flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;position:fixed!important;right:max(14px,env(safe-area-inset-right))!important;bottom:max(18px,env(safe-area-inset-bottom))!important;z-index:60!important;align-items:center;justify-content:center;min-height:50px}
+body:not(.community-view) #chatLauncher{display:none!important}
+@media(max-width:700px){body.community-view #chatLauncher{right:14px!important;bottom:max(18px,env(safe-area-inset-bottom))!important}}
 </style>
 </head>
 <body>
