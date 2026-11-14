@@ -153,6 +153,12 @@ class UserBlock(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PlatformSetting(Base):
+    __tablename__ = "platform_settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
 class Message(Base):
     __tablename__ = "messages"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -261,6 +267,12 @@ class WarningInput(BaseModel):
 class StaffPostInput(BaseModel):
     category: str = Field(min_length=3, max_length=20)
     body: str = Field(min_length=1, max_length=3000)
+
+
+class ChatMaintenanceInput(BaseModel):
+    enabled: bool
+    duration_minutes: int = Field(default=60, ge=1, le=10080)
+    notice: str = Field(default="Chat is temporarily disabled for maintenance. Please try again later.", min_length=10, max_length=240)
 
 
 class MessageInput(BaseModel):
@@ -957,10 +969,86 @@ def update_support_ticket(
 
 
 # ---------------------------------------------------------------------------
+# Chat maintenance controls
+# ---------------------------------------------------------------------------
+def chat_maintenance_state(db: Session) -> dict:
+    row = db.get(PlatformSetting, "chat_maintenance")
+    if not row:
+        return {"enabled": False, "until": None,
+                "notice": "Chat is temporarily disabled for maintenance. Please try again later."}
+    try:
+        state = __import__("json").loads(row.value)
+    except (ValueError, TypeError):
+        state = {}
+    until = state.get("until")
+    if state.get("enabled") and until:
+        try:
+            expiry = datetime.fromisoformat(until)
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry <= utcnow():
+                state["enabled"] = False
+                row.value = __import__("json").dumps(state)
+                db.commit()
+        except ValueError:
+            state["enabled"] = False
+    return {"enabled": bool(state.get("enabled")), "until": state.get("until"),
+            "notice": state.get("notice") or "Chat is temporarily disabled for maintenance. Please try again later."}
+
+
+def ensure_chat_available(db: Session):
+    state = chat_maintenance_state(db)
+    if state["enabled"]:
+        raise HTTPException(status_code=503, detail={
+            "code": "CHAT_MAINTENANCE", "message": state["notice"], "until": state["until"]
+        })
+
+
+@app.get("/status/chat")
+def public_chat_status(db: Session = Depends(db_session)):
+    return chat_maintenance_state(db)
+
+
+@app.put("/master/settings/chat-maintenance")
+def set_chat_maintenance(data: ChatMaintenanceInput,
+                         user: User = Depends(require_roles("owner")),
+                         db: Session = Depends(db_session)):
+    until = (utcnow() + timedelta(minutes=data.duration_minutes)).isoformat() if data.enabled else None
+    state = {"enabled": data.enabled, "until": until, "notice": data.notice.strip()}
+    row = db.get(PlatformSetting, "chat_maintenance")
+    if row:
+        row.value = __import__("json").dumps(state)
+    else:
+        db.add(PlatformSetting(key="chat_maintenance", value=__import__("json").dumps(state)))
+    audit(db, user, "chat_maintenance_changed", "platform", 0,
+          f"enabled={data.enabled}; until={until}")
+    db.commit()
+    return state
+
+
+@app.put("/admin/settings/chat-maintenance")
+def admin_set_chat_maintenance(data: ChatMaintenanceInput,
+                               user: User = Depends(require_roles("admin")),
+                               db: Session = Depends(db_session)):
+    until = (utcnow() + timedelta(minutes=data.duration_minutes)).isoformat() if data.enabled else None
+    state = {"enabled": data.enabled, "until": until, "notice": data.notice.strip()}
+    row = db.get(PlatformSetting, "chat_maintenance")
+    if row:
+        row.value = __import__("json").dumps(state)
+    else:
+        db.add(PlatformSetting(key="chat_maintenance", value=__import__("json").dumps(state)))
+    audit(db, user, "chat_maintenance_changed", "platform", 0,
+          f"enabled={data.enabled}; until={until}")
+    db.commit()
+    return state
+
+
+# ---------------------------------------------------------------------------
 # Inbox and notifications
 # ---------------------------------------------------------------------------
 @app.post("/messages", status_code=201)
 def send_message(data: MessageInput, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    ensure_chat_available(db)
     ensure_can_post(user)
     if data.recipient_id == user.id:
         raise HTTPException(status_code=400, detail="Cannot message yourself")
@@ -989,6 +1077,7 @@ def conversation(
     other_user_id: int, limit: int = Query(default=50, ge=1, le=100),
     user: User = Depends(get_current_user), db: Session = Depends(db_session),
 ):
+    ensure_chat_available(db)
     rows = db.scalars(
         select(Message).where(
             or_(
