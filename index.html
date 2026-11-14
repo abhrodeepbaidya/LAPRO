@@ -245,6 +245,26 @@ body.chat-open #chatLauncher{display:none!important;visibility:hidden!important;
 
 /* Two-choice message deletion menu, matching the supplied reference */
 .chat-delete-options{display:none;padding:7px 2px 2px;border-top:1px solid #ffffff20;margin-top:5px}.chat-delete-options.show{display:grid}.chat-delete-options button{min-height:40px!important;padding:8px 12px!important;color:#ff554d!important;font-family:Georgia,serif;font-size:14px!important;font-weight:600!important;letter-spacing:0!important}.chat-delete-options button:active{background:#ffffff16}.chat-delete-options .chat-delete-cancel{color:#d9e0e5!important;font-family:inherit;font-size:13px!important}
+
+/* LAPRO smooth-frame performance profile: let the device/browser use its native refresh rate (up to 120Hz). */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;scroll-behavior:smooth}
+body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+button,a,.side-link,.community,.post-actions button,.menu-btn,.profile-btn{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.btn,.post-actions button,.side-link,.community,.menu-btn,.profile-btn{transition:transform .14s ease,background-color .14s ease,border-color .14s ease,color .14s ease,opacity .14s ease}
+.post{content-visibility:auto;contain-intrinsic-size:auto 230px}
+.posts{contain:layout style}
+.official-post:before{will-change:transform;transform:translateZ(0)}
+.glow-avatar{will-change:filter}
+@media(max-width:700px){
+  .panel{box-shadow:0 10px 30px #00000012}
+  .official-post:before{filter:blur(18px);opacity:.48}
+  .glow-avatar{box-shadow:0 0 6px var(--glow),0 0 12px var(--glow)}
+  .glow-name{text-shadow:0 0 6px var(--glow)}
+}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
 </style>
 </head>
 <body>
