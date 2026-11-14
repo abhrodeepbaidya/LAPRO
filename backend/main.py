@@ -1,67 +1,187 @@
 import os
+import re
+import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Generator
+from typing import Generator, Optional
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from pwdlib import PasswordHash
-from sqlalchemy import DateTime, Integer, String, create_engine, func, select
+from sqlalchemy import (
+    Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
+    create_engine, func, select, desc, or_
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./lapro_dev.db")
-JWT_SECRET = os.getenv("JWT_SECRET")
-if not JWT_SECRET:
-    raise RuntimeError("JWT_SECRET environment variable is required")
-JWT_ALGORITHM = "HS256"
-TOKEN_EXPIRE_MINUTES = int(os.getenv("TOKEN_EXPIRE_MINUTES", "60"))
-FRONTEND_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5500,http://127.0.0.1:5500").split(",")
-    if origin.strip()
-]
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgresql://") and "+psycopg" not in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET or len(JWT_SECRET) < 32:
+    raise RuntimeError("Set JWT_SECRET to a random secret of at least 32 characters")
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", "30"))
+REFRESH_TOKEN_DAYS = int(os.getenv("REFRESH_TOKEN_DAYS", "14"))
+OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").strip().lower()
+FRONTEND_ORIGINS = [
+    item.strip() for item in os.getenv(
+        "FRONTEND_ORIGINS",
+        "http://localhost:5500,http://127.0.0.1:5500,https://abhrodeepbaidya.github.io"
+    ).split(",") if item.strip()
+]
+if "*" in FRONTEND_ORIGINS:
+    raise RuntimeError("Wildcard CORS is not allowed when credentials are enabled")
+
+engine_args = {"pool_pre_ping": True}
+if DATABASE_URL.startswith("sqlite"):
+    engine_args["connect_args"] = {"check_same_thread": False}
+engine = create_engine(DATABASE_URL, **engine_args)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Database models
+# ---------------------------------------------------------------------------
 class User(Base):
     __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     alias: Mapped[str] = mapped_column(String(30), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[str] = mapped_column(String(20), default="user")
+    role: Mapped[str] = mapped_column(String(20), default="user", index=True)
+    xp: Mapped[int] = mapped_column(Integer, default=0)
+    answer_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    restricted_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Post(Base):
+    __tablename__ = "posts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    category: Mapped[str] = mapped_column(String(20), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="published", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Comment(Base):
+    __tablename__ = "comments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"), index=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Like(Base):
+    __tablename__ = "likes"
+    __table_args__ = (UniqueConstraint("post_id", "user_id", name="uq_like_post_user"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class XPEvent(Base):
+    __tablename__ = "xp_events"
+    __table_args__ = (UniqueConstraint("event_key", name="uq_xp_event_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    points: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(50))
+    event_key: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    target_type: Mapped[str] = mapped_column(String(20))
+    target_id: Mapped[int] = mapped_column(Integer, index=True)
+    reason: Mapped[str] = mapped_column(String(40))
+    details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    action: Mapped[str] = mapped_column(String(60))
+    target_type: Mapped[str] = mapped_column(String(30))
+    target_id: Mapped[int] = mapped_column(Integer)
+    details: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    message: Mapped[str] = mapped_column(String(240))
+    read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="LAPRO API", version="0.1.0")
+# ---------------------------------------------------------------------------
+# API, schemas and helpers
+# ---------------------------------------------------------------------------
+app = FastAPI(
+    title="LAPRO API",
+    description="Anonymous community API: accounts, posts, comments, XP, moderation and inbox.",
+    version="1.0.0",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
-password_hash = PasswordHash.recommended()
+password_hasher = PasswordHash.recommended()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+ROLES = {"owner", "admin", "manager", "supervisor", "guard", "user"}
+STAFF_ROLES = {"owner", "admin", "manager", "supervisor", "guard"}
+CATEGORIES = {"thought", "feeling", "question", "fact", "kindness"}
+REPORT_REASONS = {"spam", "harassment", "hate", "personal_info", "threat", "other"}
 
 
 class RegisterInput(BaseModel):
     alias: str = Field(min_length=3, max_length=30, pattern=r"^[A-Za-z0-9_]+$")
     email: EmailStr
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
 
 
 class LoginInput(BaseModel):
@@ -69,19 +189,68 @@ class LoginInput(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
-class UserOutput(BaseModel):
+class RefreshInput(BaseModel):
+    refresh_token: str
+
+
+class PostInput(BaseModel):
+    category: str
+    body: str = Field(min_length=1, max_length=3000)
+
+
+class CommentInput(BaseModel):
+    body: str = Field(min_length=1, max_length=1500)
+
+
+class ReportInput(BaseModel):
+    target_type: str
+    target_id: int = Field(gt=0)
+    reason: str
+    details: Optional[str] = Field(default=None, max_length=1000)
+
+
+class MessageInput(BaseModel):
+    recipient_id: int = Field(gt=0)
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class RoleInput(BaseModel):
+    role: str
+
+
+class RestrictionInput(BaseModel):
+    days: int = Field(ge=1, le=3650)
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class XPAdjustmentInput(BaseModel):
+    points: int = Field(ge=-10000, le=10000)
+    reason: str = Field(min_length=3, max_length=300)
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     alias: str
     role: str
+    xp: int
+    status: str
     created_at: datetime
 
 
-class TokenOutput(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+class PostOut(BaseModel):
+    id: int
+    author_id: int
+    author_alias: str
+    author_xp: int
+    category: str
+    body: str
+    like_count: int
+    comment_count: int
+    created_at: datetime
 
 
-def get_db() -> Generator[Session, None, None]:
+def db_session() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
@@ -89,69 +258,543 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def create_access_token(user_id: int) -> str:
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": str(user_id),
-        "iat": now,
-        "exp": now + timedelta(minutes=TOKEN_EXPIRE_MINUTES),
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-) -> User:
-    unauthorized = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid or expired access token",
-        headers={"WWW-Authenticate": "Bearer"},
+def token_for(user: User, token_type: str, expires: timedelta) -> str:
+    now = utcnow()
+    return jwt.encode(
+        {"sub": str(user.id), "type": token_type, "iat": now, "exp": now + expires,
+         "jti": secrets.token_urlsafe(16)},
+        JWT_SECRET, algorithm=JWT_ALGORITHM
     )
+
+
+def decode_token(token: str, expected_type: str) -> int:
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user_id = int(payload["sub"])
+        if payload.get("type") != expected_type:
+            raise ValueError("wrong token type")
+        return int(payload["sub"])
     except (jwt.PyJWTError, KeyError, TypeError, ValueError):
-        raise unauthorized
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(db_session)) -> User:
+    user_id = decode_token(token, "access")
     user = db.get(User, user_id)
-    if not user:
-        raise unauthorized
+    if not user or user.status == "banned":
+        raise HTTPException(status_code=401, detail="Account unavailable")
+    if user.restricted_until and user.restricted_until > utcnow():
+        # Restrictions block posting/messaging, not reading.
+        pass
     return user
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "lapro-api"}
+def require_roles(*roles: str):
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        if user.role not in roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return dependency
 
 
-@app.post("/auth/register", response_model=UserOutput, status_code=201)
-def register(data: RegisterInput, db: Session = Depends(get_db)):
-    alias = data.alias.strip()
-    email = data.email.lower().strip()
-    existing = db.scalar(select(User).where((User.email == email) | (User.alias == alias)))
+def ensure_can_post(user: User):
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="Account is restricted")
+    if user.restricted_until and user.restricted_until > utcnow():
+        raise HTTPException(status_code=403, detail="Posting restriction is active")
+
+
+def add_xp(db: Session, user: User, points: int, reason: str, event_key: str):
+    if points == 0:
+        return
+    existing = db.scalar(select(XPEvent).where(XPEvent.event_key == event_key))
     if existing:
-        raise HTTPException(status_code=409, detail="Email or alias is already registered")
-    user = User(
-        alias=alias,
-        email=email,
-        password_hash=password_hash.hash(data.password),
-        role="user",
-    )
+        return
+    db.add(XPEvent(user_id=user.id, points=points, reason=reason, event_key=event_key))
+    user.xp = max(0, user.xp + points)
+
+
+def notify(db: Session, user_id: int, kind: str, message: str):
+    db.add(Notification(user_id=user_id, kind=kind, message=message[:240]))
+
+
+def audit(db: Session, actor: User, action: str, target_type: str, target_id: int, details: str = ""):
+    db.add(AuditLog(actor_id=actor.id, action=action, target_type=target_type,
+                    target_id=target_id, details=details[:2000]))
+
+
+def post_payload(db: Session, post: Post) -> dict:
+    author = db.get(User, post.author_id)
+    return {
+        "id": post.id, "author_id": post.author_id,
+        "author_alias": author.alias if author else "Unknown",
+        "author_xp": author.xp if author else 0,
+        "category": post.category, "body": post.body,
+        "like_count": db.scalar(select(func.count(Like.id)).where(Like.post_id == post.id)) or 0,
+        "comment_count": db.scalar(select(func.count(Comment.id)).where(Comment.post_id == post.id)) or 0,
+        "created_at": post.created_at,
+    }
+
+
+def create_tokens(user: User) -> dict:
+    return {
+        "access_token": token_for(user, "access", timedelta(minutes=ACCESS_TOKEN_MINUTES)),
+        "refresh_token": token_for(user, "refresh", timedelta(days=REFRESH_TOKEN_DAYS)),
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_MINUTES * 60,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Health and authentication
+# ---------------------------------------------------------------------------
+@app.get("/")
+def root():
+    return {"service": "LAPRO API", "version": app.version, "docs": "/docs"}
+
+
+@app.get("/health")
+def health(db: Session = Depends(db_session)):
+    db.execute(select(1))
+    return {"status": "ok", "database": "connected"}
+
+
+@app.post("/auth/register", response_model=UserOut, status_code=201)
+def register(data: RegisterInput, db: Session = Depends(db_session)):
+    alias = data.alias.strip()
+    email = str(data.email).lower().strip()
+    if db.scalar(select(User).where(or_(func.lower(User.email) == email, func.lower(User.alias) == alias.lower()))):
+        raise HTTPException(status_code=409, detail="Email or alias already registered")
+    role = "owner" if OWNER_EMAIL and email == OWNER_EMAIL else "user"
+    user = User(alias=alias, email=email, password_hash=password_hasher.hash(data.password), role=role)
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
 
 
-@app.post("/auth/login", response_model=TokenOutput)
-def login(data: LoginInput, db: Session = Depends(get_db)):
-    email = data.email.lower().strip()
-    user = db.scalar(select(User).where(User.email == email))
-    if not user or not password_hash.verify(data.password, user.password_hash):
+@app.post("/auth/login")
+def login(data: LoginInput, db: Session = Depends(db_session)):
+    email = str(data.email).lower().strip()
+    user = db.scalar(select(User).where(func.lower(User.email) == email))
+    if not user or not password_hasher.verify(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
-    return {"access_token": create_access_token(user.id), "token_type": "bearer"}
+    if user.status == "banned":
+        raise HTTPException(status_code=403, detail="Account is banned")
+    return create_tokens(user)
 
 
-@app.get("/auth/me", response_model=UserOutput)
-def me(user: User = Depends(current_user)):
+@app.post("/auth/refresh")
+def refresh(data: RefreshInput, db: Session = Depends(db_session)):
+    user_id = decode_token(data.refresh_token, "refresh")
+    user = db.get(User, user_id)
+    if not user or user.status == "banned":
+        raise HTTPException(status_code=401, detail="Account unavailable")
+    return create_tokens(user)
+
+
+@app.get("/auth/me", response_model=UserOut)
+def me(user: User = Depends(get_current_user)):
     return user
+
+
+# ---------------------------------------------------------------------------
+# Community posts, comments, likes and public profile
+# ---------------------------------------------------------------------------
+@app.get("/posts")
+def list_posts(
+    category: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None, max_length=100),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(db_session),
+):
+    stmt = select(Post).where(Post.status == "published")
+    if category:
+        category = category.lower()
+        if category not in CATEGORIES:
+            raise HTTPException(status_code=400, detail="Invalid category")
+        stmt = stmt.where(Post.category == category)
+    if search:
+        stmt = stmt.where(Post.body.ilike(f"%{search}%"))
+    posts = db.scalars(stmt.order_by(desc(Post.created_at)).offset(offset).limit(limit)).all()
+    return {"items": [post_payload(db, post) for post in posts], "limit": limit, "offset": offset}
+
+
+@app.post("/posts", status_code=201)
+def create_post(data: PostInput, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    ensure_can_post(user)
+    category = data.category.lower()
+    if category not in CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid category")
+    body = data.body.strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Post cannot be empty")
+    post = Post(author_id=user.id, category=category, body=body)
+    db.add(post)
+    db.flush()
+    db.commit()
+    db.refresh(post)
+    return post_payload(db, post)
+
+
+@app.get("/posts/{post_id}")
+def get_post(post_id: int, db: Session = Depends(db_session)):
+    post = db.get(Post, post_id)
+    if not post or post.status != "published":
+        raise HTTPException(status_code=404, detail="Post not found")
+    return post_payload(db, post)
+
+
+@app.patch("/posts/{post_id}")
+def edit_post(post_id: int, data: PostInput, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    ensure_can_post(user)
+    post = db.get(Post, post_id)
+    if not post or (post.author_id != user.id and user.role not in STAFF_ROLES):
+        raise HTTPException(status_code=404, detail="Post not found")
+    category = data.category.lower()
+    if category not in CATEGORIES:
+        raise HTTPException(status_code=400, detail="Invalid category")
+    post.category, post.body, post.updated_at = category, data.body.strip(), utcnow()
+    db.commit()
+    return post_payload(db, post)
+
+
+@app.delete("/posts/{post_id}")
+def delete_post(post_id: int, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    post = db.get(Post, post_id)
+    if not post or (post.author_id != user.id and user.role not in STAFF_ROLES):
+        raise HTTPException(status_code=404, detail="Post not found")
+    post.status = "removed"
+    db.commit()
+    return {"ok": True, "message": "Post removed"}
+
+
+@app.get("/posts/{post_id}/comments")
+def list_comments(post_id: int, db: Session = Depends(db_session)):
+    post = db.get(Post, post_id)
+    if not post or post.status != "published":
+        raise HTTPException(status_code=404, detail="Post not found")
+    rows = db.execute(
+        select(Comment, User).join(User, User.id == Comment.author_id)
+        .where(Comment.post_id == post_id).order_by(Comment.created_at.asc())
+    ).all()
+    return [{"id": c.id, "post_id": c.post_id, "author_id": c.author_id,
+             "author_alias": u.alias, "body": c.body, "created_at": c.created_at} for c, u in rows]
+
+
+@app.post("/posts/{post_id}/comments", status_code=201)
+def add_comment(post_id: int, data: CommentInput, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    ensure_can_post(user)
+    post = db.get(Post, post_id)
+    if not post or post.status != "published":
+        raise HTTPException(status_code=404, detail="Post not found")
+    comment = Comment(post_id=post_id, author_id=user.id, body=data.body.strip())
+    db.add(comment)
+    user.answer_count += 1
+    add_xp(db, user, 1, "answer_posted", f"answer:{comment.id}")
+    if post.author_id != user.id:
+        notify(db, post.author_id, "comment", f"{user.alias} replied to your post")
+    db.commit()
+    db.refresh(comment)
+    return {"id": comment.id, "post_id": post_id, "author_id": user.id,
+            "author_alias": user.alias, "body": comment.body, "created_at": comment.created_at}
+
+
+@app.delete("/comments/{comment_id}")
+def delete_comment(comment_id: int, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    comment = db.get(Comment, comment_id)
+    if not comment or (comment.author_id != user.id and user.role not in STAFF_ROLES):
+        raise HTTPException(status_code=404, detail="Comment not found")
+    db.delete(comment)
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/posts/{post_id}/like")
+def toggle_like(post_id: int, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    post = db.get(Post, post_id)
+    if not post or post.status != "published":
+        raise HTTPException(status_code=404, detail="Post not found")
+    existing = db.scalar(select(Like).where(Like.post_id == post_id, Like.user_id == user.id))
+    if existing:
+        db.delete(existing)
+        db.commit()
+        return {"liked": False, "like_count": db.scalar(select(func.count(Like.id)).where(Like.post_id == post_id))}
+    db.add(Like(post_id=post_id, user_id=user.id))
+    db.flush()
+    count = db.scalar(select(func.count(Like.id)).where(Like.post_id == post_id)) or 0
+    # XP is granted only to the post author at each new 10-like milestone.
+    if post.author_id != user.id and count > 0 and count % 10 == 0:
+        author = db.get(User, post.author_id)
+        if author:
+            add_xp(db, author, 1, "post_likes_milestone", f"post:{post_id}:likes:{count}")
+            notify(db, author.id, "xp", "Your post reached a like milestone: +1 XP")
+    db.commit()
+    return {"liked": True, "like_count": count}
+
+
+@app.get("/users/{user_id}")
+def public_profile(user_id: int, db: Session = Depends(db_session)):
+    user = db.get(User, user_id)
+    if not user or user.status == "banned":
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"id": user.id, "alias": user.alias, "role": user.role,
+            "xp": user.xp, "answer_count": user.answer_count, "created_at": user.created_at}
+
+
+@app.get("/users/{user_id}/posts")
+def user_posts(user_id: int, limit: int = Query(default=25, ge=1, le=100), db: Session = Depends(db_session)):
+    posts = db.scalars(select(Post).where(Post.author_id == user_id, Post.status == "published")
+                       .order_by(desc(Post.created_at)).limit(limit)).all()
+    return [post_payload(db, post) for post in posts]
+
+
+# ---------------------------------------------------------------------------
+# Reports, staff tools, moderation and audit trail
+# ---------------------------------------------------------------------------
+@app.post("/reports", status_code=201)
+def create_report(data: ReportInput, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    target_type = data.target_type.lower()
+    reason = data.reason.lower()
+    if target_type not in {"post", "comment", "user"} or reason not in REPORT_REASONS:
+        raise HTTPException(status_code=400, detail="Invalid report target or reason")
+    report = Report(reporter_id=user.id, target_type=target_type, target_id=data.target_id,
+                    reason=reason, details=data.details)
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return {"id": report.id, "status": report.status}
+
+
+@app.get("/staff/reports")
+def staff_reports(
+    report_status: str = Query(default="open", alias="status"),
+    user: User = Depends(require_roles("owner", "admin", "manager", "supervisor", "guard")),
+    db: Session = Depends(db_session),
+):
+    stmt = select(Report)
+    if report_status != "all":
+        stmt = stmt.where(Report.status == report_status)
+    reports = db.scalars(stmt.order_by(desc(Report.created_at)).limit(200)).all()
+    return [{"id": r.id, "reporter_id": r.reporter_id, "target_type": r.target_type,
+             "target_id": r.target_id, "reason": r.reason, "details": r.details,
+             "status": r.status, "created_at": r.created_at} for r in reports]
+
+
+@app.patch("/staff/reports/{report_id}")
+def resolve_report(
+    report_id: int,
+    report_status: str = Query(alias="status", pattern="^(reviewing|resolved|dismissed)$"),
+    user: User = Depends(require_roles("owner", "admin", "manager", "supervisor", "guard")),
+    db: Session = Depends(db_session),
+):
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report.status = report_status
+    audit(db, user, "report_status_changed", "report", report_id, report_status)
+    db.commit()
+    return {"id": report.id, "status": report.status}
+
+
+@app.patch("/staff/users/{user_id}/role")
+def change_role(
+    user_id: int, data: RoleInput,
+    user: User = Depends(require_roles("owner", "admin")),
+    db: Session = Depends(db_session),
+):
+    target = db.get(User, user_id)
+    new_role = data.role.lower()
+    if not target or new_role not in ROLES:
+        raise HTTPException(status_code=404, detail="User or role not found")
+    if target.role == "owner":
+        raise HTTPException(status_code=403, detail="Owner role cannot be changed through this endpoint")
+    if user.role == "admin" and new_role in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Admins cannot appoint owners or admins")
+    target.role = new_role
+    audit(db, user, "role_changed", "user", target.id, f"role={new_role}")
+    db.commit()
+    return {"user_id": target.id, "role": target.role}
+
+
+@app.post("/staff/users/{user_id}/restrict")
+def restrict_user(
+    user_id: int, data: RestrictionInput,
+    user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+    db: Session = Depends(db_session),
+):
+    target = db.get(User, user_id)
+    if not target or target.role == "owner" or (user.role != "owner" and target.role in {"admin", "manager"}):
+        raise HTTPException(status_code=404, detail="User not found or action not allowed")
+    target.restricted_until = utcnow() + timedelta(days=data.days)
+    target.status = "restricted"
+    audit(db, user, "user_restricted", "user", target.id, f"{data.days} days: {data.reason}")
+    db.commit()
+    return {"user_id": target.id, "status": target.status, "restricted_until": target.restricted_until}
+
+
+@app.post("/staff/users/{user_id}/ban")
+def ban_user(
+    user_id: int, data: RestrictionInput,
+    user: User = Depends(require_roles("owner", "admin")),
+    db: Session = Depends(db_session),
+):
+    target = db.get(User, user_id)
+    if not target or target.role == "owner" or (user.role == "admin" and target.role in {"admin", "manager"}):
+        raise HTTPException(status_code=404, detail="User not found or action not allowed")
+    target.status = "banned"
+    target.restricted_until = utcnow() + timedelta(days=data.days)
+    audit(db, user, "user_banned", "user", target.id, f"{data.days} days: {data.reason}")
+    db.commit()
+    return {"user_id": target.id, "status": target.status, "days": data.days}
+
+
+@app.post("/staff/users/{user_id}/unban")
+def unban_user(
+    user_id: int,
+    user: User = Depends(require_roles("owner", "admin")),
+    db: Session = Depends(db_session),
+):
+    target = db.get(User, user_id)
+    if not target or target.role == "owner":
+        raise HTTPException(status_code=404, detail="User not found")
+    target.status = "active"
+    target.restricted_until = None
+    audit(db, user, "user_unbanned", "user", target.id)
+    db.commit()
+    return {"user_id": target.id, "status": target.status}
+
+
+@app.post("/staff/users/{user_id}/xp")
+def adjust_xp(
+    user_id: int, data: XPAdjustmentInput,
+    user: User = Depends(require_roles("owner", "admin")),
+    db: Session = Depends(db_session),
+):
+    target = db.get(User, user_id)
+    if not target or target.role == "owner" and user.role != "owner":
+        raise HTTPException(status_code=404, detail="User not found")
+    event_key = f"staff-adjust:{user.id}:{target.id}:{secrets.token_urlsafe(12)}"
+    add_xp(db, target, data.points, "staff_adjustment", event_key)
+    audit(db, user, "xp_adjusted", "user", target.id, f"{data.points}: {data.reason}")
+    db.commit()
+    return {"user_id": target.id, "xp": target.xp}
+
+
+@app.get("/staff/audit")
+def staff_audit(
+    limit: int = Query(default=100, ge=1, le=500),
+    user: User = Depends(require_roles("owner", "admin")),
+    db: Session = Depends(db_session),
+):
+    rows = db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(limit)).all()
+    return [{"id": x.id, "actor_id": x.actor_id, "action": x.action,
+             "target_type": x.target_type, "target_id": x.target_id,
+             "details": x.details, "created_at": x.created_at} for x in rows]
+
+
+# ---------------------------------------------------------------------------
+# Inbox and notifications
+# ---------------------------------------------------------------------------
+@app.post("/messages", status_code=201)
+def send_message(data: MessageInput, user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    ensure_can_post(user)
+    if data.recipient_id == user.id:
+        raise HTTPException(status_code=400, detail="Cannot message yourself")
+    recipient = db.get(User, data.recipient_id)
+    if not recipient or recipient.status == "banned":
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    message = Message(sender_id=user.id, recipient_id=recipient.id, body=data.body.strip())
+    db.add(message)
+    notify(db, recipient.id, "message", f"New message from {user.alias}")
+    db.commit()
+    db.refresh(message)
+    return {"id": message.id, "sender_id": user.id, "recipient_id": recipient.id,
+            "body": message.body, "created_at": message.created_at}
+
+
+@app.get("/messages/{other_user_id}")
+def conversation(
+    other_user_id: int, limit: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(get_current_user), db: Session = Depends(db_session),
+):
+    rows = db.scalars(
+        select(Message).where(
+            or_(
+                (Message.sender_id == user.id) & (Message.recipient_id == other_user_id),
+                (Message.sender_id == other_user_id) & (Message.recipient_id == user.id),
+            )
+        ).order_by(desc(Message.created_at)).limit(limit)
+    ).all()
+    for message in rows:
+        if message.recipient_id == user.id and message.read_at is None:
+            message.read_at = utcnow()
+    db.commit()
+    return [{"id": m.id, "sender_id": m.sender_id, "recipient_id": m.recipient_id,
+             "body": m.body, "read_at": m.read_at, "created_at": m.created_at}
+            for m in reversed(rows)]
+
+
+@app.get("/notifications")
+def notifications(
+    unread_only: bool = False, limit: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(get_current_user), db: Session = Depends(db_session),
+):
+    stmt = select(Notification).where(Notification.user_id == user.id)
+    if unread_only:
+        stmt = stmt.where(Notification.read.is_(False))
+    rows = db.scalars(stmt.order_by(desc(Notification.created_at)).limit(limit)).all()
+    return [{"id": n.id, "kind": n.kind, "message": n.message,
+             "read": n.read, "created_at": n.created_at} for n in rows]
+
+
+@app.post("/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: int, user: User = Depends(get_current_user), db: Session = Depends(db_session)
+):
+    item = db.get(Notification, notification_id)
+    if not item or item.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    item.read = True
+    db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# XP and account status
+# ---------------------------------------------------------------------------
+@app.get("/xp/tiers")
+def xp_tiers():
+    return [
+        {"name": "Purple Glow", "min_xp": 0, "max_xp": 49},
+        {"name": "Blue-Purple Glow", "min_xp": 50, "max_xp": 99},
+        {"name": "Red Glow", "min_xp": 100, "max_xp": 498},
+        {"name": "Fire Blaze", "min_xp": 499, "max_xp": 499},
+        {"name": "Green Glowers", "min_xp": 500, "max_xp": 999},
+        {"name": "Golden Extreme", "min_xp": 1000, "max_xp": None},
+    ]
+
+
+@app.get("/xp/me")
+def my_xp(user: User = Depends(get_current_user), db: Session = Depends(db_session)):
+    events = db.scalars(select(XPEvent).where(XPEvent.user_id == user.id)
+                        .order_by(desc(XPEvent.created_at)).limit(100)).all()
+    return {"xp": user.xp, "answer_count": user.answer_count,
+            "recent_events": [{"points": e.points, "reason": e.reason, "created_at": e.created_at}
+                              for e in events]}
+
+
+@app.get("/users")
+def search_users(
+    q: str = Query(min_length=2, max_length=30),
+    limit: int = Query(default=20, ge=1, le=50),
+    user: User = Depends(get_current_user), db: Session = Depends(db_session),
+):
+    rows = db.scalars(select(User).where(
+        User.status == "active", func.lower(User.alias).like(f"%{q.lower()}%")
+    ).limit(limit)).all()
+    return [{"id": x.id, "alias": x.alias, "xp": x.xp} for x in rows]
