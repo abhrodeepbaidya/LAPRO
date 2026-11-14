@@ -37,6 +37,7 @@ REFRESH_TOKEN_DAYS = int(os.getenv("REFRESH_TOKEN_DAYS", "14"))
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").strip().lower()
 MASTER_PASSCODE = os.getenv("MASTER_PASSCODE", "")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+FIREBASE_PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "bxtron-login").strip()
 FRONTEND_ORIGINS = [
     item.strip() for item in os.getenv(
         "FRONTEND_ORIGINS",
@@ -242,6 +243,11 @@ class LoginInput(BaseModel):
 
 class GoogleAuthInput(BaseModel):
     credential: str = Field(min_length=20, max_length=10000)
+    alias: Optional[str] = Field(default=None, min_length=3, max_length=30, pattern=r"^[A-Za-z0-9_]+$")
+
+
+class FirebaseAuthInput(BaseModel):
+    id_token: str = Field(min_length=20, max_length=10000)
     alias: Optional[str] = Field(default=None, min_length=3, max_length=30, pattern=r"^[A-Za-z0-9_]+$")
 
 
@@ -551,6 +557,46 @@ def google_auth(data: GoogleAuthInput, db: Session = Depends(db_session)):
     db.refresh(user)
     return create_tokens(user)
 
+
+
+@app.post("/auth/firebase")
+def firebase_auth(data: FirebaseAuthInput, db: Session = Depends(db_session)):
+    try:
+        claims = google_id_token.verify_firebase_token(
+            data.id_token, google_requests.Request(), audience=FIREBASE_PROJECT_ID
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Firebase ID token is invalid or expired")
+    if claims.get("email_verified") is not True:
+        raise HTTPException(status_code=403, detail="Verify your Google email before signing in")
+    email = str(claims.get("email", "")).strip().lower()
+    subject = str(claims.get("user_id") or claims.get("sub") or "").strip()
+    if not email or not subject:
+        raise HTTPException(status_code=401, detail="Firebase identity is missing required claims")
+    user = db.scalar(select(User).where(User.google_sub == subject))
+    if not user:
+        user = db.scalar(select(User).where(func.lower(User.email) == email))
+        if user:
+            if user.google_sub and user.google_sub != subject:
+                raise HTTPException(status_code=409, detail="This email is linked to another Google identity")
+            user.google_sub = subject
+        else:
+            base_alias = (data.alias or email.split("@", 1)[0]).strip()
+            base_alias = re.sub(r"[^A-Za-z0-9_]", "_", base_alias)[:24]
+            if len(base_alias) < 3:
+                base_alias = "user_" + secrets.token_hex(3)
+            alias = base_alias
+            while db.scalar(select(User.id).where(func.lower(User.alias) == alias.lower())):
+                alias = (base_alias[:23] + "_" + secrets.token_hex(2))[:30]
+            role = "owner" if OWNER_EMAIL and email == OWNER_EMAIL else "user"
+            user = User(alias=alias, email=email, google_sub=subject,
+                        password_hash=password_hasher.hash(secrets.token_urlsafe(48)), role=role)
+            db.add(user)
+    if user.status == "banned":
+        raise HTTPException(status_code=403, detail="Account is banned")
+    db.commit()
+    db.refresh(user)
+    return create_tokens(user)
 
 @app.post("/auth/refresh")
 def refresh(data: RefreshInput, db: Session = Depends(db_session)):
