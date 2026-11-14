@@ -61,3 +61,24 @@ def test_post_comment_and_like():
     like = client.post(f"/posts/{post_id}/like", headers=reader_headers)
     assert like.status_code == 200
     assert like.json()["liked"] is True
+
+
+
+def test_bgmi_news_is_staff_published_and_publicly_readable():
+    owner = register("laproowner", "owner@example.com")
+    assert owner.status_code == 201
+    login = client.post("/auth/login", json={
+        "email": "owner@example.com", "password": "a-very-long-test-password"
+    })
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    published = client.post("/staff/bgmi/news", headers=headers, json={
+        "title": "BGMI community test update",
+        "body": "This is a test news item with a source link for the community.",
+        "tag": "Community",
+        "source_url": "https://example.com/update"
+    })
+    assert published.status_code == 201
+    feed = client.get("/bgmi/news")
+    assert feed.status_code == 200
+    assert any(item["title"] == "BGMI community test update" for item in feed.json())
