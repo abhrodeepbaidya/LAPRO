@@ -262,7 +262,7 @@ var seed=[
 ];
 var posts=loadPosts(),liked=loadLikes(),community='All',authMode='signup',session=loadSession();
 var unreadNotice=localStorage.getItem('lapro_notice_read')!=='yes';
-function renderNoticeDot(){var d=$('#notificationDot');if(d)d.classList.toggle('show',unreadNotice)}
+function renderNoticeDot(){var d=$('#notificationDot'),b=$('#inboxBtn');if(d)d.classList.toggle('show',unreadNotice);if(b)b.classList.toggle('hide',!unreadNotice)}
 var officialPost={id:'lapro-official-welcome',type:'LAPRO OFFICIAL',text:'Welcome to LAPRO. A place where your thoughts speak and your identity stays hidden. Keep it real, keep it respectful — this community is just getting started.',alias:'LAPRO OFFICIAL',created:Date.now()-60000,likes:0,answers:[],community:'All',official:true};if(!posts.some(function(p){return p.id===officialPost.id})){posts.unshift(officialPost);savePosts()}
 function loadPosts(){try{var v=JSON.parse(localStorage.getItem(STORAGE));return Array.isArray(v)?v:seed.slice()}catch(e){return seed.slice()}}
 function loadLikes(){try{return new Set(JSON.parse(localStorage.getItem(LIKES)||'[]'))}catch(e){return new Set()}}
