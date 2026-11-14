@@ -142,6 +142,18 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+class BGMINews(Base):
+    __tablename__ = "bgmi_news"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    body: Mapped[str] = mapped_column(Text)
+    tag: Mapped[str] = mapped_column(String(30), default="News")
+    source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="published", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -212,6 +224,13 @@ class ReportInput(BaseModel):
 class MessageInput(BaseModel):
     recipient_id: int = Field(gt=0)
     body: str = Field(min_length=1, max_length=2000)
+
+
+class BGMINewsInput(BaseModel):
+    title: str = Field(min_length=5, max_length=160)
+    body: str = Field(min_length=10, max_length=8000)
+    tag: str = Field(default="News", max_length=30)
+    source_url: Optional[str] = Field(default=None, max_length=1000)
 
 
 class RoleInput(BaseModel):
@@ -784,6 +803,65 @@ def mark_notification_read(
 # ---------------------------------------------------------------------------
 # XP and account status
 # ---------------------------------------------------------------------------
+@app.get("/bgmi/news")
+def bgmi_news(
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(db_session),
+):
+    """Public BGMI updates/news. Only staff can publish through the staff endpoint."""
+    rows = db.scalars(
+        select(BGMINews).where(BGMINews.status == "published")
+        .order_by(desc(BGMINews.created_at)).offset(offset).limit(limit)
+    ).all()
+    return [{
+        "id": item.id, "title": item.title, "body": item.body, "tag": item.tag,
+        "source_url": item.source_url, "author_id": item.author_id,
+        "author_alias": db.get(User, item.author_id).alias if db.get(User, item.author_id) else "LAPRO Staff",
+        "created_at": item.created_at,
+    } for item in rows]
+
+
+@app.post("/staff/bgmi/news", status_code=201)
+def publish_bgmi_news(
+    data: BGMINewsInput,
+    user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+    db: Session = Depends(db_session),
+):
+    source = data.source_url.strip() if data.source_url else None
+    if source and not re.match(r"^https://", source, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="Source URL must use HTTPS")
+    item = BGMINews(
+        author_id=user.id, title=data.title.strip(), body=data.body.strip(),
+        tag=data.tag.strip() or "News", source_url=source
+    )
+    db.add(item)
+    db.flush()
+    audit(db, user, "bgmi_news_published", "bgmi_news", item.id, item.title)
+    db.commit()
+    db.refresh(item)
+    return {
+        "id": item.id, "title": item.title, "body": item.body, "tag": item.tag,
+        "source_url": item.source_url, "author_id": user.id,
+        "author_alias": user.alias, "created_at": item.created_at,
+    }
+
+
+@app.delete("/staff/bgmi/news/{news_id}")
+def remove_bgmi_news(
+    news_id: int,
+    user: User = Depends(require_roles("owner", "admin", "manager", "supervisor")),
+    db: Session = Depends(db_session),
+):
+    item = db.get(BGMINews, news_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="BGMI news item not found")
+    item.status = "removed"
+    audit(db, user, "bgmi_news_removed", "bgmi_news", item.id, item.title)
+    db.commit()
+    return {"ok": True, "id": item.id}
+
+
 @app.get("/xp/tiers")
 def xp_tiers():
     return [
