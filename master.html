@@ -20,7 +20,7 @@
 <script>
 (function(){
 const $=id=>document.getElementById(id);let token='',api='';
-const firebaseConfig={apiKey:'AIzaSyCO4XPN4o6IUpa4rz0MmBuvoISwJEmRri4',authDomain:'bxtron-login.firebaseapp.com',projectId:'bxtron-login',storageBucket:'bxtron-login.firebasestorage.app',messagingSenderId:'673712506060',appId:'1:673712506060:web:f20ad51458df46efbbee69'};
+const firebaseConfig={apiKey:'AIzaSyCO4XPN4o6IUpa4rz0MmBuvoISwJEmRri4',authDomain:'bxtron-login.firebaseapp.com',projectId:'bxtron-login',storageBucket:'bxtron-login.firebasestorage.app',messagingSenderId:'673712506060',appId:'1:673712506060:web:0498924f2e85d08fbbee69',measurementId:'G-SBL28QMV4Q'};
 if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);
 const titles={overview:'Platform overview',admins:'Admin management',security:'Security & surveillance',support:'Support tickets',posts:'Official announcements',audit:'Audit trail',settings:'Platform settings'};
 function toast(m){$('toast').textContent=m;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),3500)}
@@ -38,12 +38,12 @@ async function loadPosts(){try{const a=await request('/staff/posts?status=all');
 async function loadAudit(){try{const a=await request('/staff/audit');$('auditTable').innerHTML=a.map(x=>'<tr><td>'+date(x.created_at)+'</td><td>'+x.actor_id+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.target_type)+' #'+x.target_id+'</td><td>'+esc(x.details)+'</td></tr>').join('')||'<tr><td colspan="5">No audit events.</td></tr>'}catch(e){toast(e.message)}}
 async function chatStatus(){try{const d=await request('/status/chat');$('chatState').textContent=d.enabled?'Maintenance ON':'Chats enabled';$('chatState').className='pill '+(d.enabled?'bad':'ok');$('maintenanceUntil').textContent=d.enabled?'Scheduled end: '+date(d.until):'Chat service is available.'}catch(e){toast(e.message)}}
 document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>{document.querySelectorAll('.nav').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.page').forEach(x=>x.classList.toggle('active',x.id==='page-'+b.dataset.page));$('crumb').textContent=titles[b.dataset.page];$('pageTitle').textContent=titles[b.dataset.page];({overview:loadOverview,admins:loadAdmins,security:loadSecurity,support:loadSupport,posts:loadPosts,audit:loadAudit,settings:chatStatus})[b.dataset.page]?.()});
-$('googleLoginBtn').onclick=googleLogin;$('email').addEventListener('keydown',e=>{if(e.key==='Enter')login()});$('password').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
-$('logoutBtn').onclick=()=>{token='';$('app').classList.add('hidden');$('loginView').classList.remove('hidden');$('email').value='';$('password').value='';toast('Signed out')};
+$('googleLoginBtn').onclick=googleLogin;
+$('logoutBtn').onclick=()=>{token='';$('app').classList.add('hidden');$('loginView').classList.remove('hidden');toast('Signed out')};
 $('createAdminBtn').onclick=async()=>{try{const d={alias:$('newAlias').value.trim(),email:$('newEmail').value.trim(),password:$('newPassword').value};await request('/master/admins',{method:'POST',body:JSON.stringify(d)});$('newAlias').value=$('newEmail').value=$('newPassword').value='';toast('Admin account created');loadAdmins()}catch(e){toast(e.message)}};
 $('reloadAdmins').onclick=loadAdmins;$('reloadSecurity').onclick=loadSecurity;$('reloadSupport').onclick=loadSupport;$('reloadPosts').onclick=loadPosts;$('reloadAudit').onclick=loadAudit;
 $('publishBtn').onclick=async()=>{try{await request('/staff/posts',{method:'POST',body:JSON.stringify({category:$('postCategory').value,body:$('postBody').value.trim()})});$('postBody').value='';toast('Official post published');loadPosts()}catch(e){toast(e.message)}};
 async function setMaintenance(enabled){try{const d=await request('/master/settings/chat-maintenance',{method:'PUT',body:JSON.stringify({enabled,duration_minutes:Number($('maintenanceDuration').value),notice:$('maintenanceNotice').value})});toast(enabled?'Chat maintenance enabled':'Chats re-enabled');$('maintenanceUntil').textContent=enabled?'Scheduled end: '+date(d.until):'Chat service is available.';chatStatus()}catch(e){toast(e.message)}}
-$('maintenanceOn').onclick=()=>setMaintenance(true);$('maintenanceOff').onclick=()=>setMaintenance(false);$('saveApi').onclick=()=>{api=$('apiUrlSettings').value.trim();$('apiUrl').value=api;toast('API URL updated for this session')};
+$('maintenanceOn').onclick=()=>setMaintenance(true);$('maintenanceOff').onclick=()=>setMaintenance(false);$('saveApi').onclick=()=>{api=$('apiUrlSettings').value.trim();toast('API URL updated for this session')};
 })();
 </script></body></html>
